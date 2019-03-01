@@ -1,17 +1,19 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 
 namespace Benchmarks
 {
-	[ClrJob, CoreJob]
-	public class ClrVsCore
+	[CoreJob, ClrJob]
+	public class Benchmark
 	{
 		[Benchmark]
 		public bool AreStringsEqual() =>
@@ -59,8 +61,27 @@ namespace Benchmarks
 		[Benchmark]
 		public void TestBoxing()
 		{
-			ISomeEvilInterface animal = new SomeEvilClass(42);
-			animal.DoSomething();
+			ISomeEvilInterface foo = new SomeEvilClass(42);
+			foo.DoSomething();
+		}
+
+		// ======================================================================== // 
+
+		public struct SomeEvilClass : ISomeEvilInterface
+		{
+			private int _value;
+			public SomeEvilClass(int value)
+			{
+				_value = value;
+			}
+
+			private void DoSomethingEvil() { }
+			void ISomeEvilInterface.DoSomething() => DoSomethingEvil();
+		}
+
+		public interface ISomeEvilInterface
+		{
+			void DoSomething();
 		}
 	}
 
@@ -69,15 +90,55 @@ namespace Benchmarks
 	[CoreJob]
 	public class SpanVsArray
 	{
+		string _text;
+
 		[GlobalSetup]
-		public void MakeString() => _text = new string(Enumerable.Repeat('1', 100000).ToArray());
+		public void Setup() => _text = new string(Enumerable.Repeat('1', 100000).ToArray());
 
 		[Benchmark]
 		public string TestSubstring() => _text.Substring(0, _text.Length / 2);
-		string _text;
 
 		[Benchmark]
 		public ReadOnlySpan<char> TestSlice() => _text.AsSpan().Slice(0, _text.Length / 2);
+
+		[Benchmark]
+		public void ReadArray()
+		{
+			byte[] _buff = new byte[16];
+
+			using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(_text)))
+			{
+				while (stream.Read(_buff, 0, _buff.Length) > 0)
+				{
+					var newArray = new byte[_buff.Length / 2];
+					Array.Copy(_buff, newArray, _buff.Length / 2);
+
+					Parse(newArray);
+				}
+			}
+		}
+
+		[Benchmark]
+		public void ReadSpan()
+		{
+			byte[] _buff = new byte[16];
+
+			using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(_text)))
+			{
+				while (stream.Read(_buff, 0, _buff.Length) > 0)
+				{
+					Parse(new ReadOnlySpan<byte>(_buff, 0, _buff.Length / 2));
+				}
+			}
+		}
+
+		void Parse(ReadOnlySpan<byte> memory)
+		{
+		}
+
+		void Parse(byte[] managed)
+		{
+		}
 	}
 
 	// ======================================================================= //
@@ -86,28 +147,8 @@ namespace Benchmarks
 	{
 		static void Main(string[] args)
 		{
-			BenchmarkRunner.Run<ClrVsCore>();
+			BenchmarkRunner.Run<Benchmark>();
 			BenchmarkRunner.Run<SpanVsArray>();
 		}
 	}
-
-	// ======================================================================== // 
-
-	public struct SomeEvilClass : ISomeEvilInterface
-	{
-		private int _value;
-		public SomeEvilClass(int value)
-		{
-			_value = value;
-		}
-
-		private void DoSomethingEvil() { }
-		void ISomeEvilInterface.DoSomething() => DoSomethingEvil();
-	}
-
-	public interface ISomeEvilInterface
-	{
-		void DoSomething();
-	}
-
 }
